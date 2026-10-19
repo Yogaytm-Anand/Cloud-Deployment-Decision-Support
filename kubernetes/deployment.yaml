@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cdds-sample-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cdds-sample-app
+  template:
+    metadata:
+      labels:
+        app: cdds-sample-app
+    spec:
+      containers:
+        - name: cdds-sample-app
+          image: cdds-sample-app:1.0
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 3000
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
