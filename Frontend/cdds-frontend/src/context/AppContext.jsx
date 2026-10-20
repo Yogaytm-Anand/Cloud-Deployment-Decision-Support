@@ -7,6 +7,7 @@ import { createContext, useContext, useState, useCallback } from "react";
 // --------------------------------------------------
 
 const SESSION_KEY = "cdds_analysis";
+const LOAD_TEST_KEY = "cdds_load_tests";
 
 const AppContext = createContext(null);
 
@@ -27,11 +28,27 @@ export function AppProvider({ children }) {
 
     // metrics: the latest GET /api/metrics response object, or null
     const [metrics, setMetrics] = useState(null);
+    const [loadTests, setLoadTests] = useState(() => {
+        try {
+            return JSON.parse(sessionStorage.getItem(LOAD_TEST_KEY) || "[]");
+        } catch {
+            return [];
+        }
+    });
+
+    const saveLoadTest = useCallback((result) => {
+        setLoadTests((previous) => {
+            const next = [...previous.filter((item) => item.jobId !== result.jobId), result].slice(-12);
+            try { sessionStorage.setItem(LOAD_TEST_KEY, JSON.stringify(next)); } catch {}
+            return next;
+        });
+    }, []);
 
     // Save a new analysis result and clear any stale metrics
     const saveAnalysis = useCallback((result) => {
         setAnalysis(result);
         setMetrics(null);
+        setLoadTests((previous) => previous.filter((item) => item.jobId === result.jobId));
         try {
             sessionStorage.setItem(SESSION_KEY, JSON.stringify(result));
         } catch {
@@ -43,14 +60,16 @@ export function AppProvider({ children }) {
     const clearAnalysis = useCallback(() => {
         setAnalysis(null);
         setMetrics(null);
+        setLoadTests([]);
         try {
             sessionStorage.removeItem(SESSION_KEY);
+            sessionStorage.removeItem(LOAD_TEST_KEY);
         } catch {}
     }, []);
 
     return (
         <AppContext.Provider
-            value={{ analysis, metrics, setMetrics, saveAnalysis, clearAnalysis }}
+            value={{ analysis, metrics, loadTests, setMetrics, saveAnalysis, saveLoadTest, clearAnalysis }}
         >
             {children}
         </AppContext.Provider>

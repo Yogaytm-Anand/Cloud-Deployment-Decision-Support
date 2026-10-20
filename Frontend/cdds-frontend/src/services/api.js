@@ -1,4 +1,4 @@
-﻿// src/services/api.js
+// src/services/api.js
 //
 // Exact backend response shapes (from server.js):
 //
@@ -53,5 +53,52 @@ export async function fetchMetrics(jobId) {
         throw new Error(data.error || data.message || 'Metrics fetch failed');
     }
 
+    return data;
+}
+
+export async function fetchMonitoringStatus(jobId) {
+    const response = await fetch('/api/monitoring/status?jobId=' + encodeURIComponent(jobId));
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+        const preview = (await response.text()).substring(0, 80).replace(/\s+/g, ' ').trim();
+        throw new Error(`Monitoring status endpoint returned non-JSON (HTTP ${response.status}): ${preview}`);
+    }
+    const data = await response.json();
+    // A 503 here is a useful diagnostic state, not a transport failure.
+    if (!data || typeof data !== 'object') throw new Error('Monitoring status returned an invalid response.');
+    return data;
+}
+
+export async function runLoadTest(payload) {
+    const response = await fetch('/api/load-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+        throw new Error(data.message || data.error || 'Load test failed.');
+    }
+    return data;
+}
+
+export async function fetchLoadTests(jobId) {
+    const response = await fetch('/api/load-test?jobId=' + encodeURIComponent(jobId));
+    if (!response.ok) {
+        return { success: false, history: [] };
+    }
+    return response.json();
+}
+
+export async function calculateCostEstimate(payload) {
+    const response = await fetch('/api/cost-estimate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+        throw new Error(data.message || data.error || 'Could not calculate the estimate.');
+    }
     return data;
 }

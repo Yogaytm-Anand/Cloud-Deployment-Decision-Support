@@ -128,10 +128,6 @@ function DeploymentAnalysis() {
                         Dashboard
                     </button>
 
-                    <button onClick={() => navigate("/assessment")}>
-                        Deployment Assessment
-                    </button>
-
                     <button onClick={() => navigate("/report")}>
                         Report
                     </button>

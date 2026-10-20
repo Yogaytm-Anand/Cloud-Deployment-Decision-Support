@@ -10,7 +10,7 @@ import {
 } from "recharts";
 import { useNavigate } from "react-router-dom";
 import { useApp } from "../context/AppContext";
-import { fetchMetrics } from "../services/api";
+import { fetchMetrics, fetchMonitoringStatus } from "../services/api";
 
 const POLL_INTERVAL_MS = 5000;
 const HISTORY_LIMIT = 48;
@@ -77,6 +77,7 @@ function Monitoring() {
     const [metricsError, setMetricsError] = useState(null);
     const [lastUpdated, setLastUpdated] = useState(null);
     const [history, setHistory] = useState([]);
+    const [monitoringStatus, setMonitoringStatus] = useState(null);
 
     useEffect(() => {
         if (!jobId) return undefined;
@@ -85,10 +86,16 @@ function Monitoring() {
         setHistory([]);
 
         const loadMetrics = async () => {
-            try {
-                const data = await fetchMetrics(jobId);
-                if (!isSubscribed) return;
+            // Run both fetches independently so a failing monitoring-status endpoint
+            // does not prevent real CPU/memory data from being displayed.
+            const [metricsResult, statusResult] = await Promise.allSettled([
+                fetchMetrics(jobId),
+                fetchMonitoringStatus(jobId)
+            ]);
+            if (!isSubscribed) return;
 
+            if (metricsResult.status === "fulfilled") {
+                const data = metricsResult.value;
                 const capturedAt = new Date();
                 setMetrics(data);
                 setMetricsError(null);
@@ -103,9 +110,15 @@ function Monitoring() {
                         errorRate: data.errorRate ?? null
                     }
                 ].slice(-HISTORY_LIMIT));
-            } catch (error) {
-                if (isSubscribed) setMetricsError(error.message);
+            } else {
+                setMetricsError(metricsResult.reason?.message ?? "Metrics fetch failed");
             }
+
+            if (statusResult.status === "fulfilled") {
+                setMonitoringStatus(statusResult.value);
+            }
+            // A rejected status check is not surfaced as the primary error — it only
+            // means the diagnostic panel is unavailable, which is acceptable.
         };
 
         loadMetrics();
@@ -119,6 +132,15 @@ function Monitoring() {
 
     const cpuMillicores = metrics?.cpu == null ? null : metrics.cpu * 1000;
     const memoryMiB = metrics?.memoryMiB ?? null;
+    // After the first successful metrics fetch, show the actual pod name or "No pod found".
+    // Before that (or when there's an error and no prior data), show a contextual label.
+    const activePodLabel = metrics?.pod
+        ? metrics.pod
+        : metricsError
+            ? "Pod unavailable"
+            : lastUpdated
+                ? "No pod found"
+                : "Discovering pod\u2026";
     const status = metricsError ? "Degraded" : metrics?.pod ? "Healthy" : "Waiting for data";
 
     return (
@@ -146,11 +168,17 @@ function Monitoring() {
                 <>
                     <section className="deployment-strip">
                         <div><span>Watching deployment</span><strong>{jobId}</strong></div>
-                        <div><span>Active pod</span><strong>{metrics?.pod ?? "Discovering pod…"}</strong></div>
+                        <div><span>Active pod</span><strong>{activePodLabel}</strong></div>
                         <div><span>Refresh cadence</span><strong>Every {POLL_INTERVAL_MS / 1000} seconds</strong></div>
                     </section>
 
                     {metricsError && <div className="error-banner">Prometheus is temporarily unavailable: {metricsError}</div>}
+                    {monitoringStatus && <section className={`monitoring-diagnostic ${monitoringStatus.ready ? "monitoring-diagnostic--ready" : ""}`}>
+                        <strong>Monitoring diagnostic</strong>
+                        <span>Prometheus: {monitoringStatus.prometheus?.state || "unknown"}</span>
+                        <span>Targets: {monitoringStatus.targets?.state || "unknown"}{monitoringStatus.targets?.down?.length ? ` (${monitoringStatus.targets.down.join(", ")} down)` : ""}</span>
+                        <span>CPU + memory queries: {monitoringStatus.queries?.state || "unknown"}</span>
+                    </section>}
 
                     <section className="stats-grid" aria-label="Current metrics">
                         <StatCard label="CPU usage" value={formatValue(cpuMillicores, "m", 2)} detail={metrics?.cpuPercentage == null ? "Awaiting resource data" : `${metrics.cpuPercentage.toFixed(1)}% of limit`} tone="gold" />

@@ -1231,6 +1231,30 @@ input {
     border-radius: 12px;
 }
 
+.monitoring-diagnostic { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 14px 0; padding: 11px 14px; border: 1px solid #e6bf83; border-radius: 10px; background: #fff8eb; color: #6a5128; font-size: .78rem; }
+.monitoring-diagnostic strong { color: #3e3120; }
+.monitoring-diagnostic--ready { border-color: #b5d7c2; background: #f1fbf4; color: #356248; }
+.load-test-page { width: min(100% - 56px, 1180px); margin: 0 auto; padding: 32px 0 48px; }
+.load-test-layout { display: grid; grid-template-columns: minmax(260px, .72fr) minmax(0, 1.5fr); gap: 20px; margin-top: 20px; }
+.load-test-form, .load-test-results { border: 1px solid var(--line); border-radius: 16px; padding: 22px; background: var(--surface); }
+.load-test-form { display: flex; flex-direction: column; gap: 14px; }
+.load-test-form > strong { color: var(--ink); font-size: .9rem; overflow-wrap: anywhere; }
+.load-test-form label { display: flex; flex-direction: column; gap: 6px; color: var(--ink-soft); font-size: .78rem; font-weight: 700; }
+.load-test-form input, .load-test-form select { min-height: 40px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: #fff; font: inherit; }
+.load-test-form small, .load-test-note { color: var(--ink-soft); line-height: 1.45; font-size: .76rem; }
+.load-test-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.load-test-empty { min-height: 230px; display: grid; align-content: center; }
+.load-test-empty h2, .load-test-result-heading h2, .load-resource-chart h2 { margin: 4px 0 8px; color: var(--ink); font-size: 1.05rem; }
+.load-test-empty p { color: var(--ink-soft); max-width: 430px; }
+.load-test-result-heading { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.load-test-result-heading small { color: var(--ink-soft); font-size: .72rem; text-align: right; }
+.load-test-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 18px 0; }
+.load-test-metrics article { min-height: 80px; padding: 12px; border-radius: 10px; background: #f8f5ef; }
+.load-test-metrics span, .load-test-metrics small { display: block; color: var(--ink-soft); font-size: .68rem; }
+.load-test-metrics strong { display: block; margin: 6px 0 2px; color: var(--ink); font-size: 1rem; }
+.load-resource-chart { margin-top: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
+@media (max-width: 800px) { .load-test-page { width: min(100% - 28px, 1180px); padding-top: 16px; } .load-test-layout { grid-template-columns: 1fr; } .load-test-metrics { grid-template-columns: repeat(2, 1fr); } }
+
 .modern-empty-state {
     padding: 78px 20px;
     border: 1px dashed #cfc3b0;
