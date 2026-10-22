@@ -16,7 +16,7 @@ function LoadTesting() {
     const [form, setForm] = useState({ loadLevel: "light", targetPath: "/", ...PRESETS.light });
     const [running, setRunning] = useState(false);
     const [error, setError] = useState("");
-    const currentResult = useMemo(() => loadTests.find((test) => test.jobId === analysis?.jobId) || null, [analysis?.jobId, loadTests]);
+    const currentResult = useMemo(() => loadTests.filter((test) => test.jobId === analysis?.jobId).at(-1) || null, [analysis?.jobId, loadTests]);
 
     const selectLevel = (event) => {
         const loadLevel = event.target.value;

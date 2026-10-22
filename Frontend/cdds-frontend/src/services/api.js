@@ -102,3 +102,42 @@ export async function calculateCostEstimate(payload) {
     }
     return data;
 }
+
+async function readJsonResponse(response, fallbackMessage) {
+    const body = await response.text();
+    try {
+        return JSON.parse(body);
+    } catch {
+        const isHtml = /^\s*<!doctype\s+html|^\s*<html[\s>]/i.test(body);
+        const error = new Error(isHtml
+            ? "The backend API returned the frontend HTML page. Restart the backend on port 4000 and try again."
+            : fallbackMessage);
+        error.code = isHtml ? "API_NON_JSON_RESPONSE" : "API_INVALID_RESPONSE";
+        error.status = response.status;
+        throw error;
+    }
+}
+
+export async function fetchStoredCostEstimate(jobId) {
+    const response = await fetch('/api/cost-estimate?jobId=' + encodeURIComponent(jobId));
+    return readJsonResponse(response, "The saved cost estimate response was invalid.");
+}
+
+export async function generateReport(payload) {
+    const response = await fetch('/api/report/generate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+    });
+    const data = await readJsonResponse(response, "The report-generation response was invalid.");
+    if (!response.ok || !data.success) {
+        const error = new Error(data.message || 'Report generation failed.');
+        error.code = data.code;
+        error.prerequisites = data.prerequisites;
+        throw error;
+    }
+    return data;
+}
+
+export async function fetchStoredReport(jobId) {
+    const response = await fetch('/api/report?jobId=' + encodeURIComponent(jobId));
+    return readJsonResponse(response, "The saved report response was invalid.");
+}

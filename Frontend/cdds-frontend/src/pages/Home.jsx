@@ -15,7 +15,7 @@ function Home() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
     const navigate = useNavigate();
-    const { saveAnalysis, clearAnalysis } = useApp();
+    const { analysis, saveAnalysis, clearAnalysis } = useApp();
 
     const handleAnalyze = async (event) => {
         event.preventDefault();
@@ -34,13 +34,20 @@ function Home() {
         try {
             const result = await analyzeRepo(url);
             saveAnalysis(result);
-            navigate("/monitoring");
+            setLoading(false);
         } catch (requestError) {
             setError(requestError.message || "Analysis failed. Check that the local backend is running.");
         } finally {
             setLoading(false);
         }
     };
+
+    const progressStages = analysis ? [
+        ["Repository validation", analysis.validation?.dockerfile, analysis.validation?.dockerfile ? "Dockerfile found" : "Dockerfile missing"],
+        ["Container build", analysis.dockerBuild?.success, analysis.dockerBuild?.success ? "Image built" : (analysis.dockerBuild?.error || "Build not completed")],
+        ["Kubernetes manifests", analysis.kubernetesGeneration?.success, analysis.kubernetesGeneration?.success ? "Files generated" : (analysis.kubernetesGeneration?.error || "Generation not completed")],
+        ["Cluster deployment", analysis.kubernetesDeployment?.success, analysis.kubernetesDeployment?.success ? "Deployment is live" : (analysis.kubernetesDeployment?.error || "Deployment not completed")]
+    ] : [];
 
     return (
         <main className="home-page deploy-workspace">
@@ -69,10 +76,18 @@ function Home() {
                         <button type="submit" disabled={loading}>{loading ? "Preparing…" : "Deploy workspace"}</button>
                     </div>
                     {error && <p className="form-message form-message--error">{error}</p>}
-                    {loading && <p className="form-message">Cloning, building, and deploying your workload…</p>}
+                    {loading && <p className="form-message">Backend is running the deployment workflow. Stage completion appears only when the backend reports it.</p>}
                     {!loading && !error && <p className="form-message">A Dockerfile in the repository root is required.</p>}
                 </form>
             </section>
+
+            {(loading || analysis) && <section className="deployment-progress" aria-live="polite">
+                <div><p className="eyebrow">Deployment progress</p><h2>{loading ? "Working through the deployment pipeline" : "Deployment workflow result"}</h2></div>
+                <div className="deployment-progress-list">
+                    {(progressStages.length ? progressStages : [["Repository validation", null, "Waiting for backend response"], ["Container build", null, "Waiting for backend response"], ["Kubernetes manifests", null, "Waiting for backend response"], ["Cluster deployment", null, "Waiting for backend response"]]).map(([title, success, detail]) => <article key={title}><span className={`deployment-progress-dot ${success === true ? "is-success" : success === false ? "is-failure" : "is-pending"}`} /> <div><strong>{title}</strong><small>{detail}</small></div></article>)}
+                </div>
+                {!loading && <button className="primary-button" onClick={() => navigate("/monitoring")}>Open Observability</button>}
+            </section>}
 
             <section className="workflow-overview">
                 <div>

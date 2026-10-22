@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useApp } from "../context/AppContext";
-import { fetchMetrics, fetchLoadTests } from "../services/api";
+import { calculateCostEstimate, fetchMetrics, fetchLoadTests } from "../services/api";
 import "../cost-estimation.css";
 
 const DEFAULTS = {
@@ -32,7 +32,7 @@ function formatValue(value, unit, precision = 1) {
 
 function CostEstimation() {
     const navigate = useNavigate();
-    const { analysis, metrics, loadTests, setMetrics, saveLoadTest } = useApp();
+    const { analysis, metrics, loadTests, setMetrics, saveLoadTest, saveCostEstimate } = useApp();
     const [form, setForm] = useState(DEFAULTS);
     const [estimate, setEstimate] = useState(null);
     const [loading, setLoading] = useState(false);
@@ -122,20 +122,9 @@ function CostEstimation() {
         setError("");
         setEstimate(null);
         try {
-            const response = await fetch("/api/cost-estimate", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    ...form,
-                    jobId: analysis?.jobId,
-                    loadTests: currentJobLoadTests
-                })
-            });
-            const data = await response.json();
-            if (!response.ok || !data.success) {
-                throw new Error(data.message || "Could not calculate the estimate.");
-            }
+            const data = await calculateCostEstimate({ ...form, jobId: analysis?.jobId, loadTests: currentJobLoadTests });
             setEstimate(data.estimate);
+            saveCostEstimate({ jobId: analysis?.jobId, estimate: data.estimate, calculatedAt: new Date().toISOString() });
         } catch (err) {
             setError(err.message || "Could not connect to the backend.");
         } finally {

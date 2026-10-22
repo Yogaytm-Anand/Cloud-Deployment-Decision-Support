@@ -3,9 +3,11 @@ const express = require("express");
 const simpleGit = require("simple-git");
 const fs = require("fs");
 const path = require("path");
+require("dotenv").config({ path: path.resolve(__dirname, ".env") });
 const os = require("os");
 const net = require("net");
 const { performance } = require("perf_hooks");
+const { GoogleGenAI, Type } = require("@google/genai");
 // Monitoring has one canonical configuration. PROMETHEUS_URL points at the single
 // Prometheus process; the Kubernetes API proxy is used only for Kubernetes service
 // probes and as an explicitly configured fallback, never as a second Prometheus.
@@ -26,6 +28,9 @@ const probeHistory = new Map();
 let loadTestRunning = false;
 const loadTestHistory = new Map();
 const MAX_LOAD_TEST_HISTORY = 12;
+const costEstimateHistory = new Map();
+const reportHistory = new Map();
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
 
 const app = express();
 
@@ -102,7 +107,7 @@ async function ensureKubernetesProxy() {
             "proxy",
             `--port=${port}`,
             "--address=127.0.0.1",
-            "--accept-hosts=^127\.0\.0\.1$,^localhost$"
+            "--accept-hosts=^127\\.0\\.0\\.1$,^localhost$"
         ],
         { detached: true, stdio: "ignore" }
     );
@@ -1499,7 +1504,7 @@ app.post("/api/cost-estimate", async (req, res) => {
     const eksMonthly = clusterHourly * AWS_COST_REFERENCE.hoursPerMonth;
     const totalMonthly = computeMonthly + eksMonthly + storageMonthly;
 
-    return res.json({
+    const estimateResponse = {
         success: true,
         estimate: {
             provider: "AWS",
@@ -1574,7 +1579,154 @@ app.post("/api/cost-estimate", async (req, res) => {
                 priceCalculator: "https://calculator.aws/"
             }
         }
-    });
+    };
+    if (jobId) {
+        costEstimateHistory.set(jobId, { jobId, estimate: estimateResponse.estimate, calculatedAt: new Date().toISOString() });
+    }
+    return res.json(estimateResponse);
+});
+
+app.get("/api/cost-estimate", (req, res) => {
+    const { jobId } = req.query;
+    if (typeof jobId !== "string" || !/^cdds-[a-zA-Z0-9-]{1,80}$/.test(jobId)) {
+        return res.status(400).json({ success: false, message: "A valid jobId is required." });
+    }
+    return res.json({ success: true, jobId, estimate: costEstimateHistory.get(jobId) || null });
+});
+
+function validReportShape(report) {
+    return report && typeof report === "object" &&
+        typeof report.executiveSummary === "string" &&
+        Array.isArray(report.keyFindings) &&
+        Array.isArray(report.verifiedFacts) &&
+        Array.isArray(report.derivedValues) &&
+        Array.isArray(report.recommendations) &&
+        Array.isArray(report.missingInformation) &&
+        report.performanceAnalysis && typeof report.performanceAnalysis === "object" &&
+        report.infrastructureRecommendations && typeof report.infrastructureRecommendations === "object" &&
+        report.costAnalysis && typeof report.costAnalysis === "object" &&
+        Array.isArray(report.risksAndLimitations) &&
+        typeof report.finalConclusion === "string";
+}
+
+function classifyGeminiError(error) {
+    const message = String(error?.message || error || "Gemini request failed.");
+    const status = Number(error?.status || error?.code || error?.response?.status || 0);
+    if (status === 401 || status === 403 || /api key|unauthori[sz]ed|permission denied|invalid credential/i.test(message)) {
+        return Object.assign(new Error("Gemini credentials were rejected. Check GEMINI_API_KEY."), { status: 502, code: "AI_INVALID_CREDENTIALS" });
+    }
+    if (status === 429 || /rate limit|resource exhausted|quota/i.test(message)) {
+        return Object.assign(new Error("Gemini rate limit or quota was reached. Try again later."), { status: 429, code: "AI_RATE_LIMITED" });
+    }
+    if (status === 503 || /high demand|temporarily unavailable|service unavailable/i.test(message)) {
+        return Object.assign(new Error("Gemini is temporarily unavailable because of high demand. Try again shortly."), { status: 503, code: "AI_PROVIDER_UNAVAILABLE" });
+    }
+    if (status === 404 || /model.*(not found|unavailable)|not found/i.test(message)) {
+        return Object.assign(new Error(`Gemini model \"${GEMINI_MODEL}\" is unavailable. Check GEMINI_MODEL.`), { status: 502, code: "AI_MODEL_UNAVAILABLE" });
+    }
+    return Object.assign(new Error("Gemini report generation failed. Check the backend logs and Gemini service status."), { status: 502, code: "AI_PROVIDER_ERROR" });
+}
+
+async function requestAiReport(evidence) {
+    if (!process.env.GEMINI_API_KEY) {
+        throw Object.assign(new Error("GEMINI_API_KEY is not configured on the backend."), { status: 503, code: "AI_NOT_CONFIGURED" });
+    }
+
+    try {
+        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+        const response = await ai.models.generateContent({
+            model: GEMINI_MODEL,
+            contents: `Produce a structured technical report using only this evidence:\n${JSON.stringify(evidence)}`,
+            config: {
+                systemInstruction: "You are a cloud deployment decision analyst. Use only the supplied evidence. Never invent measurements, prices, tests, or missing values. Clearly distinguish verified facts, derived calculations, recommendations, hypotheses, and unavailable information. Recommend EKS only when its operational complexity is justified.",
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        executiveSummary: { type: Type.STRING },
+                        keyFindings: { type: Type.ARRAY, items: { type: Type.STRING } },
+                        verifiedFacts: { type: Type.ARRAY, items: { type: Type.STRING } },
+                        derivedValues: { type: Type.ARRAY, items: { type: Type.STRING } },
+                        recommendations: { type: Type.ARRAY, items: { type: Type.STRING } },
+                        missingInformation: { type: Type.ARRAY, items: { type: Type.STRING } },
+                        performanceAnalysis: { type: Type.OBJECT, properties: { summary: { type: Type.STRING } } },
+                        infrastructureRecommendations: { type: Type.OBJECT, properties: { summary: { type: Type.STRING } } },
+                        costAnalysis: { type: Type.OBJECT, properties: { summary: { type: Type.STRING } } },
+                        risksAndLimitations: { type: Type.ARRAY, items: { type: Type.STRING } },
+                        finalConclusion: { type: Type.STRING }
+                    },
+                    required: ["executiveSummary", "keyFindings", "verifiedFacts", "derivedValues", "recommendations", "missingInformation", "performanceAnalysis", "infrastructureRecommendations", "costAnalysis", "risksAndLimitations", "finalConclusion"]
+                }
+            }
+        });
+        const content = response.text;
+        let report;
+        try { report = JSON.parse(content); } catch { throw new Error("Gemini returned invalid JSON for the report."); }
+        if (!validReportShape(report)) throw new Error("Gemini report did not match the required report schema.");
+        return report;
+    } catch (error) {
+        if (error?.code === "AI_INVALID_CREDENTIALS" || error?.code === "AI_RATE_LIMITED" || error?.code === "AI_PROVIDER_UNAVAILABLE" || error?.code === "AI_MODEL_UNAVAILABLE" || error?.code === "AI_PROVIDER_ERROR") throw error;
+        throw classifyGeminiError(error);
+    }
+}
+
+app.post("/api/report/generate", async (req, res) => {
+    const { jobId, metrics: suppliedMetrics, loadTests: suppliedLoadTests, costEstimate: suppliedCostEstimate } = req.body || {};
+    if (typeof jobId !== "string" || !/^cdds-[a-zA-Z0-9-]{1,80}$/.test(jobId)) {
+        return res.status(400).json({ success: false, message: "A valid jobId is required." });
+    }
+    const loadTests = [...(loadTestHistory.get(jobId) || []), ...(Array.isArray(suppliedLoadTests) ? suppliedLoadTests : [])];
+    const costRecord = costEstimateHistory.get(jobId) || suppliedCostEstimate;
+    let kubernetesConfiguration;
+    try { kubernetesConfiguration = await getKubernetesDeploymentResources(jobId); } catch (error) {
+        return res.status(424).json({ success: false, message: `Deployment configuration is unavailable: ${error.message}` });
+    }
+    const monitoring = await getMonitoringStatus(jobId);
+    const metrics = suppliedMetrics && suppliedMetrics.jobId === jobId ? suppliedMetrics : null;
+    const cpuMemoryReady = monitoring.queries.state === "ready" ||
+        (metrics && Number.isFinite(Number(metrics.cpu)) && Number.isFinite(Number(metrics.memoryMiB)));
+    const prerequisites = {
+        cpuMemory: cpuMemoryReady,
+        loadTesting: loadTests.length > 0,
+        costEstimation: Boolean(costRecord?.estimate || costRecord?.totalMonthly)
+    };
+    if (!Object.values(prerequisites).every(Boolean)) {
+        const missing = Object.entries(prerequisites).filter(([, ready]) => !ready).map(([name]) => name);
+        return res.status(412).json({ success: false, code: "REPORT_PREREQUISITES_INCOMPLETE", message: `Report requires completed CPU/memory testing, load testing, and cost estimation. Missing: ${missing.join(", ")}.`, prerequisites });
+    }
+    const missingData = [];
+    if (loadTests.some((entry) => entry.resources && entry.resources.available === false)) {
+        missingData.push("Per-sample CPU and memory during at least one load test were unavailable; only the aggregate load result is verified.");
+    }
+    if (!metrics) {
+        missingData.push("The saved CPU and memory result was verified from Prometheus at report time; no separate frontend snapshot was supplied.");
+    }
+    const evidence = {
+        generatedAt: new Date().toISOString(),
+        jobId,
+        configuration: kubernetesConfiguration,
+        cpuMemory: metrics || { monitoring: monitoring.queries, status: "verified_from_prometheus" },
+        loadTests,
+        costEstimate: costRecord.estimate || costRecord,
+        monitoringStatus: monitoring,
+        missingData
+    };
+    try {
+        const report = await requestAiReport(evidence);
+        const result = { jobId, generatedAt: evidence.generatedAt, evidence, report };
+        reportHistory.set(jobId, result);
+        return res.json({ success: true, ...result });
+    } catch (error) {
+        return res.status(error.status || 502).json({ success: false, code: error.code || "REPORT_GENERATION_FAILED", message: error.message, prerequisites });
+    }
+});
+
+app.get("/api/report", (req, res) => {
+    const { jobId } = req.query;
+    if (typeof jobId !== "string" || !/^cdds-[a-zA-Z0-9-]{1,80}$/.test(jobId)) {
+        return res.status(400).json({ success: false, message: "A valid jobId is required." });
+    }
+    return res.json({ success: true, report: reportHistory.get(jobId) || null });
 });
 
 

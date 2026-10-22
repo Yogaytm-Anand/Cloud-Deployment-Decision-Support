@@ -5,9 +5,9 @@ const navigation = [
     { to: "/", label: "Deploy", mark: "01" },
     { to: "/analysis", label: "Pipeline", mark: "02" },
     { to: "/monitoring", label: "Observability", mark: "03" },
-    { to: "/load-testing", label: "Load testing", mark: "04" },
-    { to: "/report", label: "Report", mark: "05" },
-    { to: "/cost-estimation", label: "Cost Estimation", mark: "06" }
+    { to: "/load-testing", label: "Load Testing", mark: "04" },
+    { to: "/cost-estimation", label: "Cost Estimation", mark: "05" },
+    { to: "/report", label: "Report", mark: "06" }
 ];
 
 function AppShell({ children }) {
